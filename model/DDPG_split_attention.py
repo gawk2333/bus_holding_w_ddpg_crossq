@@ -3,7 +3,6 @@ import torch.nn as nn
 import numpy as np
 import random
 import os
-from model import layers
 import scipy.sparse as sp
 import copy
 from model.Attentions import MultiHeadAttention

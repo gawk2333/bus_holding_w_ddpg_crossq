@@ -409,8 +409,6 @@ class Engine():
                                     self.busstop_list)]
                             fp.append(self.bus_list[bus_id_].his[temp] + stop_dist + bus_dist + [
                                 abs(temp - current_interval)] + [bus_id_])
-                            if len(fp)>3:
-                                print(">3 events")
                 temp += 1
 
             reward1 = (-var / mean / mean) * (1 - self.weight) * 5

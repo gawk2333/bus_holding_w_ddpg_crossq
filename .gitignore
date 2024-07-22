@@ -162,7 +162,7 @@ test-results/
 *.swo
 
 # saved model file
-model/save
+#model/save
 
 # ide settings
 .idea/
