@@ -36,11 +36,13 @@ if args.model == 'ddpg':
     from model.DDPG import Agent
 if args.model == 'maddpg':
     from model.MADDPG import Agent
+if args.model == 'crossq':
+    from model.CrossQ import Agent
 
 
 
 def train(args):
-    stop_list, pax_num = U.getStopList(args.data)
+    stop_list, pax_list = U.getStopList(args.data)
     print('Stops prepared, total bus stops: %g' % (len(stop_list)))
     bus_routes = U.getBusRoute(args.data)
     print('Bus routes prepared, total routes :%g' % (len(bus_routes)))
@@ -48,6 +50,7 @@ def train(args):
     dispatch_times, bus_list, route_list, simulation_step = U.init_bus_list(bus_routes)
     print('init...')
     agents = {}
+    print('pax_list',pax_list)
     if args.model != '':
         eng = Sim_Engine.Engine(bus_list=bus_list, busstop_list=stop_list_, control_type=args.control,
                                 dispatch_times=dispatch_times,
@@ -179,9 +182,9 @@ def evaluate(args):
                                   seed=args.seed)
                 agents[k] = agent
 
-    rs = [np.random.randint(10, 20) / 10. for _ in range(10)]
+    rs = [np.random.randint(10, 20) / 10. for _ in range(100)]
 
-    for ep in range(10):
+    for ep in range(100):
         stop_list_ = copy.deepcopy(stop_list)
         bus_list_ = copy.deepcopy(bus_list)
         r = rs[ep]

@@ -97,7 +97,7 @@ class Bus():
         self.stops_record.append(self.pass_stop[-1])
     def dep(self, d=0):
         try:
-            self.move(d )
+            self.move(d)
             self.arr = 0
             self.is_hold=0
 

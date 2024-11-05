@@ -11,24 +11,25 @@ class Engine():
     def __init__(self,  bus_list,busstop_list,route_list,simulation_step,dispatch_times, demand=0,agents=None,share_scale=0, is_allow_overtake=0,hold_once_arr=1,control_type=1,seed=1,all=0,weight=0):
 
         self.all=all
-        self.busstop_list = busstop_list
-        self.simulation_step = simulation_step
+        self.bus_list = bus_list #current state of buses
+        self.busstop_list = busstop_list #current state of busstops
+
+        self.simulation_step = simulation_step 
         self.pax_list = {} # passenger on road
         self.arr_pax_list = {} # passenger who has finished trip
         self.dispatch_buslist = {}
         self.agents = {}
         self.route_list = route_list
-        self.dispatch_buslist = {}
         self.is_allow_overtake = is_allow_overtake
         self.hold_once_arr = hold_once_arr
         self.control_type = control_type
         self.agents = agents
-        self.bus_list = bus_list
         self.bunching_times = 0
         self.arrstops = 0
         self.reward_signal = {}
         self.reward_signalp1={}
         self.reward_signalp2={}
+        self.reward_signalp3={}
         self.qloss = {}
         self.weight = weight/10.
         self.demand = demand
@@ -46,6 +47,7 @@ class Engine():
             self.reward_signal[b_id]=[]
             self.reward_signalp1[b_id] = []
             self.reward_signalp2[b_id] = []
+            self.reward_signalp3[b_id] = []
 
         self.arrivals = {}
 
@@ -68,7 +70,8 @@ class Engine():
         self.state_record = []
 
     def cal_statistic(self,name,train=1):
-        print('total pax:%d'%(len(self.pax_list)))
+        pax_num = len(self.pax_list)
+        print('total pax:%d'%(pax_num))
         wait_cost = []
         travel_cost = []
         headways_var = {}
@@ -137,6 +140,7 @@ class Engine():
                     headways_mean[bus_stop_id]=[np.mean(h)]
 
         log = {}
+        # log['pax_num'] = pax_num
         log['wait_cost'] = wait_cost
         log['travel_cost'] = travel_cost
         log['hold_cost'] = hold_cost
@@ -151,12 +155,14 @@ class Engine():
         AHD = []
         AOD = []
         for k in bus.pass_stop:
+            mean_load = np.mean(self.busstop_list[k].arr_bus_load)
+            var_load = np.var(self.busstop_list[k].arr_bus_load)
             AHD.append(np.mean(stop_wise_hold[k]))
             try:
-                if math.isnan(np.var(self.busstop_list[k].arr_bus_load) / np.mean(self.busstop_list[k].arr_bus_load)):
+                if mean_load == 0 or np.isnan(mean_load) or np.isnan(var_load):
                     AOD.append(0)
                 else:
-                    AOD.append(np.var(self.busstop_list[k].arr_bus_load) / np.mean(self.busstop_list[k].arr_bus_load))
+                    AOD.append(var_load / mean_load)
             except:
                 AOD.append(0.)
             try:
@@ -184,7 +190,6 @@ class Engine():
     def serve(self,bus,stop):
         board_cost = 0
         alight_cost = 0
-        board_pax = []
         alight_pax = []
         if bus!=None:
             alight_pax = bus.pax_alight_fix(stop, self.pax_list)
@@ -233,7 +238,7 @@ class Engine():
 
         ## dispatch bus
         for bus_id, bus in self.bus_list.items():
-
+            # If the bus's dispatch time has arrived and it hasn't been dispatched yet (is_dispatch == 0), the bus is dispatched.
             if bus.is_dispatch==0 and bus.dispatch_time<=self.simulation_step:
                 bus.is_dispatch=1
                 if bus.is_virtual!=1:
@@ -242,7 +247,8 @@ class Engine():
                     bus.current_speed = bus.speed*0.8
                 self.dispatch_buslist[bus_id]=bus
 
-
+            #If a bus has no more stops to serve (len(bus.left_stop) <= 0),
+            #it is marked as finished (is_dispatch = -1) and removed from the dispatch list.
             if bus.is_dispatch==1 and len(self.dispatch_buslist[bus_id].left_stop)<=0:
                 bus.is_dispatch = -1
                 self.dispatch_buslist.pop(bus_id,None)
@@ -257,10 +263,15 @@ class Engine():
 
         ## bus dynamic
         for bus_id, bus in self.dispatch_buslist.items():
-            bus.serve_remain = max(bus.serve_remain - 1,0)
-            bus.hold_remain = max(bus.hold_remain - 1, 0)
+            bus.serve_remain = max(bus.serve_remain - 1, 0)
+            if isinstance(bus.hold_remain, np.ndarray):
+                bus.hold_remain = np.maximum(bus.hold_remain - 1, 0)
+            else:
+                bus.hhold_remain = max(bus.hold_remain - 1, 0) 
 
-            if bus.is_virtual==1 and bus.arr==0 and abs(bus.loc[-1]-bus.stop_dist[bus.left_stop[0]])<bus.speed :
+            bus.hold_remain_value = bus.hold_remain if not isinstance(bus.hold_remain, np.ndarray) else np.mean(bus.hold_remain)
+            # print('bus.hold_remain_value',bus.hold_remain_value)
+            if bus.is_virtual == 1 and bus.arr == 0 and abs(bus.loc[-1] - bus.stop_dist[bus.left_stop[0]]) < bus.speed:
                 curr_stop = self.busstop_list[bus.left_stop[0]]
                 bus.hold_remain = 0
                 bus.serve_remain = 0
@@ -269,20 +280,21 @@ class Engine():
                 bus.arr = 1
 
             ### on-arrival
-            if bus.is_virtual==0 and bus.arr==0 and abs(bus.loc[-1]-bus.stop_dist[bus.left_stop[0]])<bus.speed :
-                #### determine boarding and alight cost
+            if bus.is_virtual == 0 and bus.arr == 0 and abs(bus.loc[-1] - bus.stop_dist[bus.left_stop[0]]) < bus.speed:
+                # Boarding and alighting logic
                 if bus.left_stop[0] not in self.busstop_list:
                     self.busstop_list[bus.left_stop[0]] = self.busstop_list[bus.left_stop[0].split('_')[0]]
 
                 curr_stop = self.busstop_list[bus.left_stop[0]]
                 self.busstop_list[bus.left_stop[0]].arr_bus_load.append(len(bus.onboard_list))
                 if bus.route_id in self.busstop_list[curr_stop.id].arr_log:
-                    self.busstop_list[curr_stop.id].arr_log[bus.route_id].append(self.simulation_step)#([bus.id, self.simulation_step])
+                    self.busstop_list[curr_stop.id].arr_log[bus.route_id].append(self.simulation_step)
                 else:
-                    self.busstop_list[curr_stop.id].arr_log[bus.route_id] =[self.simulation_step]# [[bus.id, self.simulation_step]]
-                board_cost,alight_cost = self.serve(bus,curr_stop)
-                bus.arr=1
-                bus.serve_remain = max(board_cost,alight_cost)+1.
+                    self.busstop_list[curr_stop.id].arr_log[bus.route_id] = [self.simulation_step]
+
+                board_cost, alight_cost = self.serve(bus, curr_stop)
+                bus.arr = 1
+                bus.serve_remain = max(board_cost, alight_cost) + 1.
 
                 bus.stay[curr_stop.id] = 1
                 bus.cost[curr_stop.id] = bus.serve_remain
@@ -290,13 +302,13 @@ class Engine():
                 bus.left_stop = bus.left_stop[1:]
 
                 ## if determine holding once arriving
-                if self.hold_once_arr==1 and len(bus.pass_stop)>1  and self.dispatch_times[bus.route_id].index(bus.dispatch_time)>0 :#and len(self.dispatch_buslist)>2 and len(bus.pass_stop)>2 and len(bus.left_stop)>1 and bus.forward_bus!=None:
+                if self.hold_once_arr==1 and len(bus.pass_stop)>1 and self.dispatch_times[bus.route_id].index(bus.dispatch_time)>0:
                     if self.simulation_step in self.arrivals:
                         self.arrivals[self.simulation_step].append([curr_stop.id, bus_id, len(bus.onboard_list)])
                     else:
                         self.arrivals[self.simulation_step] = [[curr_stop.id, bus_id, len(bus.onboard_list)]]
 
-                    bus.hold_remain = self.control(bus, curr_stop,type=self.control_type)
+                    bus.hold_remain = self.control(bus, curr_stop, type=self.control_type)
                     # added by bonny, make control as total dwelling time including serving time
                     # bus.hold_remain = max(bus.hold_remain - bus.serve_remain, 0)
                     if bus.hold_remain > 0:
@@ -353,12 +365,9 @@ class Engine():
         if type==2:
             return self.rl_control(bus,bus_stop)
 
-        return 0
-
     def rl_control(self, bus, bus_stop):
         # retrive historical state
         current_interval = self.simulation_step
-
 
         state = []
         for record in self.arrivals[current_interval]:
@@ -382,15 +391,14 @@ class Engine():
 
         mark = list(np.array(state + list(action)).reshape(-1, ))
         self.bus_list[bus.id].his[self.simulation_step] = mark
-
+    
         if len(self.GM.temp_memory[bus.id]['a']) > 0:
             # organize fingerprint: consider impact of other agent between two consecutive control of the ego agent
             stop_dist = [0.]
             bus_dist = [0.]
 
-            fp = [self.GM.temp_memory[bus.id]['s'][-1] +self.GM.temp_memory[bus.id]['a'][-1].tolist()+ stop_dist + bus_dist + [0.] + [bus.id]]
+            fp = [self.GM.temp_memory[bus.id]['s'][-1] + self.GM.temp_memory[bus.id]['a'][-1].tolist() + stop_dist + bus_dist + [0.] + [bus.id]]
             temp = bus.last_vist_interval
-            # temp = current_interval - 600
             while temp <= current_interval:
                 if temp in self.arrivals:
                     for record in self.arrivals[temp]:
@@ -413,12 +421,27 @@ class Engine():
 
             reward1 = (-var / mean / mean) * (1 - self.weight) * 5
             reward2 = (-abs(self.GM.temp_memory[bus.id]['a'][-1])) * self.weight
-            reward = reward1 + reward2
+            # retrieve the passenger from self.pax_list
+            total_waiting_time = 0
+            for stop_id, bus_stop in self.busstop_list.items():
+                for pax_id in bus_stop.waiting_list:
+                    pax = self.pax_list[pax_id]  
+                    total_waiting_time += (self.simulation_step - pax.arr_time)
+            reward3 = 0
+            if total_waiting_time <= 0:
+                reward3 = 0
+            elif total_waiting_time >= 1000:
+                reward3 = -3
+            else:
+                reward3 = -(total_waiting_time / 1000) * 3
+
+            reward = reward1 + reward2 + reward3
 
             self.reward_record.append(reward)
             self.reward_signal[bus.id].append(reward)
             self.reward_signalp1[bus.id].append(reward1)
             self.reward_signalp2[bus.id].append(reward2)
+            self.reward_signalp3[bus.id].append(reward3)
 
             self.GM.temp_memory[bus.id]['r'].append(reward)
             self.GM.temp_memory[bus.id]['fp'].append(fp)

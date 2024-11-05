@@ -11,9 +11,12 @@ conda activate bus-ddpg
 ```
 
 To train split-attention DDPG model:
-
 ```
-python main.py ---model=ddpg_split_attention
+python main.py --model=ddpg_split_attention
+
+To train CrossQ model:
+```
+python main.py --model=crossq
 ```
 
 To use trained split-attention DDPG model :

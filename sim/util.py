@@ -117,7 +117,7 @@ def getStopList(data, read=0):
 
     _path_demand = path + 'demand.csv'
 
-    pax_num = 0
+    pax_list = []
 
     try:
         demand = pd.DataFrame(pd.read_csv(_path_demand))
@@ -149,7 +149,7 @@ def getStopList(data, read=0):
                 stop.dyna_arr_rate.append(d.shape[0] / 3600.)
                 for dest_id in stop_list.keys():
 
-                    od = d[demand['ALIGHTING_STOP_STN'] == int(dest_id)]
+                    od = d.loc[d.index[d['ALIGHTING_STOP_STN'].reindex(d.index) == int(dest_id)]]
                     if od.empty:
                         continue
                     if dest_id not in stop.dest:
@@ -167,9 +167,9 @@ def getStopList(data, read=0):
                 pax.route = str(demand_by_stop.iloc[i]['Srvc_Number']) + '_' + str(
                     int(demand_by_stop.iloc[i]['Direction']))
                 stop.pax[pax.id] = pax
-                pax_num += 1
+                pax_list.append(pax)
 
-    return stop_list, pax_num
+    return stop_list, pax_list
 
 
 def demand_analysis(engine=None):
@@ -237,8 +237,8 @@ def train_result_track(eng, ep, qloss_log, ploss_log, log, name='', seed=0):
     reward_bus_wise = []
     reward_bus_wisep1 = []
     reward_bus_wisep2 = []
+    reward_bus_wisep3 = []
     rs = []
-
     wait_cost = log['wait_cost']
     travel_cost = log['travel_cost']
     delay = log['delay']
@@ -247,40 +247,48 @@ def train_result_track(eng, ep, qloss_log, ploss_log, log, name='', seed=0):
     headways_mean = log['headways_mean']
     AOD = log["AOD"]
     for bid, r in eng.reward_signal.items():
-        if len(r) > 0:  # .bus_list[bid].forward_bus!=None and  engine.bus_list[bid].backward_bus!=None :
+        if len(r) > 0: # .bus_list[bid].forward_bus!=None and  engine.bus_list[bid].backward_bus!=None :
             reward_bus_wise.append(np.mean(r))
             rs += r
             reward_bus_wisep1.append(np.mean(eng.reward_signalp1[bid]))
             reward_bus_wisep2.append(np.mean(eng.reward_signalp2[bid]))
+            reward_bus_wisep3.append(np.mean(eng.reward_signalp3[bid]))
 
     if ep % 1 == 0:
-        train_log = pd.DataFrame()
-        train_log['bunching'] = [log['bunching']]
-        train_log['ploss'] = [np.mean(ploss_log)]
-        train_log['qloss'] = [np.mean(qloss_log)]
-        train_log['reward'] = [np.mean(reward_bus_wise)]
-        train_log['reward1'] = [np.mean(reward_bus_wisep1)]
-        train_log['reward2'] = [np.mean(reward_bus_wisep2)]
-        train_log['avg_hold'] = np.mean(hold_cost)
-        train_log['action'] = np.mean(np.array(eng.action_record))
-        train_log['wait'] = [np.mean(wait_cost)]
-        train_log['travel'] = [np.mean(travel_cost)]
-        train_log['delay'] = [np.mean(delay)]
-        train_log['AOD'] = AOD
+        # Create initial dictionary for train_log data
+        train_log_data = {
+            'bunching': [log['bunching']],
+            'ploss': [np.mean(ploss_log)],
+            'qloss': [np.mean(qloss_log)],
+            'reward': [np.mean(reward_bus_wise)],
+            'reward1': [np.mean(reward_bus_wisep1)],
+            'reward2': [np.mean(reward_bus_wisep2)],
+            'reward3': [np.mean(reward_bus_wisep3)],
+            'avg_hold': np.mean(hold_cost),
+            'action': np.mean(np.array(eng.action_record)),
+            'wait': [np.mean(wait_cost)],
+            # 'passenger_number':[np.mean(pax_num)],
+            'travel': [np.mean(travel_cost)],
+            'delay': [np.mean(delay)],
+            'AOD': [AOD]
+        }
 
         for k, v in headways_mean.items():
-            train_log['headway_mean' + str(k)] = [np.mean(v)]
+            train_log_data[f'headway_mean{k}'] = [np.mean(v)]
         for k, v in headways_var.items():
-            train_log['headway_var' + str(k)] = [np.mean(v)]
+            train_log_data[f'headway_var{k}'] = [np.mean(v)]
 
-        res = pd.DataFrame()
-        res['stw'] = log['stw']
-        res['sto'] = log['sto']
-        res['sth'] = log['sth']
+        train_log = pd.DataFrame(train_log_data)
+        res = pd.concat([
+            pd.DataFrame({'stw': log['stw']}),
+            pd.DataFrame({'sto': log['sto']}),
+            pd.DataFrame({'sth': log['sth']})
+        ], axis=1)
+
         print(
-            'Episode: %g | reward: %g | reward_var: %g | reward1: %g | reward2: %g | ploss: %g | qloss: %g |\n  wait '
+            'Episode: %g | reward: %g | reward_var: %g | reward1: %g | reward2: %g | reward3: %g | ploss: %g | qloss: %g |\n  wait '
             'cost: %g | travel cost: %g | max hold :%g| min hold :%g| avg hold :%g | var hold :%g' % (
-                ep - 1, np.mean(reward_bus_wise), np.var(rs), np.mean(reward_bus_wisep1), np.mean(reward_bus_wisep2),
+                ep - 1, np.mean(reward_bus_wise), np.var(rs), np.mean(reward_bus_wisep1), np.mean(reward_bus_wisep2),np.mean(reward_bus_wisep3),
                 np.mean(ploss_log), np.mean(qloss_log), np.mean(wait_cost), np.mean(travel_cost), np.max(hold_cost),
                 np.min(hold_cost),
                 np.mean(hold_cost), np.var(hold_cost)))
